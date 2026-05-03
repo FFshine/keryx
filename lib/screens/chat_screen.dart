@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 
 import '../models/chat_message.dart';
@@ -530,14 +531,101 @@ class _MessageBubble extends StatelessWidget {
                     ),
                     if (message.content.isNotEmpty) const SizedBox(height: 8),
                   ],
-                  // Text content
+                  // Text content (rendered as Markdown)
                   if (message.content.isNotEmpty)
-                    Text(
-                      message.content,
-                      style: TextStyle(
-                        color: isUser
-                            ? colorScheme.onPrimary
-                            : colorScheme.onSurface,
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom: isStreaming ? 4.0 : 0,
+                      ),
+                      child: MarkdownBody(
+                        data: message.content,
+                        selectable: true,
+                        styleSheet: MarkdownStyleSheet(
+                          p: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            fontSize: 14,
+                          ),
+                          h1: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                          ),
+                          h2: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                          ),
+                          h3: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                          strong: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          em: const TextStyle(fontStyle: FontStyle.italic),
+                          code: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                            backgroundColor: isUser
+                                ? colorScheme.primary.withValues(alpha: 0.3)
+                                : colorScheme.surfaceContainerLow,
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                          ),
+                          codeblockDecoration: BoxDecoration(
+                            color: isUser
+                                ? colorScheme.primary.withValues(alpha: 0.2)
+                                : colorScheme.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          blockquoteDecoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(
+                                color: isUser
+                                    ? colorScheme.onPrimary.withValues(alpha: 0.4)
+                                    : colorScheme.outline,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                          listBullet: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
+                          ),
+                          horizontalRuleDecoration: BoxDecoration(
+                            border: Border(
+                              top: BorderSide(
+                                color: isUser
+                                    ? colorScheme.onPrimary.withValues(alpha: 0.3)
+                                    : colorScheme.outlineVariant,
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          a: TextStyle(
+                            color: isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                          blockSpacing: 6,
+                          listIndent: 20,
+                          codeblockPadding: EdgeInsets.all(10),
+                        ),
                       ),
                     ),
                   if (isStreaming) ...[
