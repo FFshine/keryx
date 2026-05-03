@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'providers/chat_provider.dart';
 import 'providers/connection_provider.dart';
@@ -8,8 +9,13 @@ import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/setup_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Check if config exists — determines initial route
+  final prefs = await SharedPreferences.getInstance();
+  final hasConfig = prefs.containsKey('keryx_base_url');
+
   runApp(
     MultiProvider(
       providers: [
@@ -26,19 +32,22 @@ void main() {
           },
         ),
       ],
-      child: const KeryxApp(),
+      child: KeryxApp(initialRoute: hasConfig ? '/chat' : '/setup'),
     ),
   );
 }
 
 class KeryxApp extends StatelessWidget {
-  const KeryxApp({super.key});
+  final String initialRoute;
+
+  const KeryxApp({super.key, required this.initialRoute});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Keryx',
       debugShowCheckedModeBanner: false,
+      initialRoute: initialRoute,
       themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
@@ -50,7 +59,6 @@ class KeryxApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF6750A4),
         brightness: Brightness.dark,
       ),
-      initialRoute: '/setup',
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case '/setup':

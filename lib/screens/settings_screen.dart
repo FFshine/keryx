@@ -28,6 +28,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadModels(conn);
   }
 
+  Future<void> _showConnectionDialog(BuildContext context, ConnectionProvider conn) async {
+    final urlController = TextEditingController(text: conn.baseUrl);
+    final keyController = TextEditingController(text: conn.apiKey);
+    bool showKey = false;
+    bool connecting = false;
+    String? error;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Edit Connection'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'http://127.0.0.1:8642',
+                      prefixIcon: Icon(Icons.dns_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: keyController,
+                    obscureText: !showKey,
+                    decoration: InputDecoration(
+                      labelText: 'API Key (optional)',
+                      hintText: 'Leave blank if no auth',
+                      prefixIcon: const Icon(Icons.key_outlined),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          showKey
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                        onPressed: () =>
+                            setDialogState(() => showKey = !showKey),
+                      ),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  if (error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ],
+                  if (connecting) ...[
+                    const SizedBox(height: 12),
+                    const LinearProgressIndicator(),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: connecting
+                  ? null
+                  : () async {
+                      setDialogState(() {
+                        connecting = true;
+                        error = null;
+                      });
+                      final success = await conn.connect(
+                        url: urlController.text.trim(),
+                        apiKey: keyController.text.trim(),
+                      );
+                      if (success && ctx.mounted) {
+                        Navigator.pop(ctx);
+                      } else if (ctx.mounted) {
+                        setDialogState(() {
+                          connecting = false;
+                          error = conn.error;
+                        });
+                      }
+                    },
+              icon: connecting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.link),
+              label: const Text('Connect'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _loadModels(ConnectionProvider conn) async {
     setState(() {
       _loadingModels = true;
@@ -197,6 +301,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 32),
+
+          // Edit Connection
+          Consumer<ConnectionProvider>(
+            builder: (context, conn, _) => Card(
+              elevation: 0,
+              margin: const EdgeInsets.only(bottom: 4),
+              child: ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit Connection'),
+                subtitle: Text(conn.baseUrl),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showConnectionDialog(context, conn),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
 
           // Disconnect button
           Consumer<ConnectionProvider>(
