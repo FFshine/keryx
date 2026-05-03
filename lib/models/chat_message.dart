@@ -1,10 +1,52 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+/// A file output from a Hermes Run (API-generated file, image, etc.)
+class FileOutput {
+  final String url;
+  final String? name;
+  final String? mimeType;
+  final int? size;
+
+  const FileOutput({
+    required this.url,
+    this.name,
+    this.mimeType,
+    this.size,
+  });
+
+  bool get isImage =>
+      mimeType?.startsWith('image/') == true ||
+      name?.endsWith('.png') == true ||
+      name?.endsWith('.jpg') == true ||
+      name?.endsWith('.jpeg') == true ||
+      name?.endsWith('.webp') == true ||
+      name?.endsWith('.gif') == true;
+
+  bool get isSvg => mimeType == 'image/svg+xml' || name?.endsWith('.svg') == true;
+
+  String get displayName => name ?? url.split('/').last;
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        if (name != null) 'name': name,
+        if (mimeType != null) 'mimeType': mimeType,
+        if (size != null) 'size': size,
+      };
+
+  factory FileOutput.fromJson(Map<String, dynamic> json) => FileOutput(
+        url: json['url'] as String,
+        name: json['name'] as String?,
+        mimeType: json['mimeType'] as String?,
+        size: json['size'] as int?,
+      );
+}
+
 class ChatMessage {
   final String role; // 'user', 'assistant', 'system'
   final String content;
   final String? imageDataUri;
+  final List<FileOutput> files; // AI-generated file outputs
   final DateTime timestamp;
 
   Uint8List? _cachedImageBytes;
@@ -13,8 +55,10 @@ class ChatMessage {
     required this.role,
     required this.content,
     this.imageDataUri,
+    List<FileOutput>? files,
     DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
+  })  : files = files ?? [],
+        timestamp = timestamp ?? DateTime.now();
 
   /// Lazy-decoded image bytes — cached after first decode
   Uint8List? get imageBytes {
@@ -60,6 +104,7 @@ class ChatMessage {
         'role': role,
         'content': content,
         if (imageDataUri != null) 'imageDataUri': imageDataUri,
+        if (files.isNotEmpty) 'files': files.map((f) => f.toJson()).toList(),
         'timestamp': timestamp.toIso8601String(),
       };
 
@@ -68,6 +113,11 @@ class ChatMessage {
         role: json['role'] as String,
         content: json['content'] as String,
         imageDataUri: json['imageDataUri'] as String?,
+        files: (json['files'] as List?)
+                ?.cast<Map<String, dynamic>>()
+                .map((f) => FileOutput.fromJson(f))
+                .toList() ??
+            [],
         timestamp: DateTime.parse(json['timestamp'] as String),
       );
 
@@ -75,11 +125,13 @@ class ChatMessage {
     String? content,
     String? role,
     String? imageDataUri,
+    List<FileOutput>? files,
   }) =>
       ChatMessage(
         role: role ?? this.role,
         content: content ?? this.content,
         imageDataUri: imageDataUri ?? this.imageDataUri,
+        files: files ?? this.files,
         timestamp: timestamp,
       );
 
@@ -87,6 +139,7 @@ class ChatMessage {
   bool get isAssistant => role == 'assistant';
   bool get isSystem => role == 'system';
   bool get hasImage => imageDataUri != null;
+  bool get hasFiles => files.isNotEmpty;
 }
 
 class ChatSession {

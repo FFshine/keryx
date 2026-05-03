@@ -192,27 +192,29 @@ class HermesApiService {
 
   // ── Async Runs ──
 
+  /// Start a run and return the run_id.
   Future<String> startRun({
     required String prompt,
     String? model,
   }) async {
     final uri = Uri.parse('$_baseUrl/v1/runs');
-    final body = jsonEncode(_sanitize({
+    final body = jsonEncode({
       'messages': [{'role': 'user', 'content': prompt}],
       if (model != null) 'model': model,
-    }));
+    });
 
     final resp = await http
         .post(uri, headers: _headers, body: body)
         .timeout(const Duration(seconds: 15));
 
     if (resp.statusCode != 202) {
-      throw ApiException('Failed to start run: ${resp.statusCode}');
+      throw ApiException('Failed to start run: ${resp.statusCode}: ${resp.body}');
     }
     final json = jsonDecode(resp.body) as Map<String, dynamic>;
     return json['run_id'] as String;
   }
 
+  /// Get current run status.
   Future<Map<String, dynamic>> getRunStatus(String runId) async {
     final uri = Uri.parse('$_baseUrl/v1/runs/$runId');
     final resp = await http
@@ -224,6 +226,7 @@ class HermesApiService {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Stop a running run.
   Future<bool> stopRun(String runId) async {
     final uri = Uri.parse('$_baseUrl/v1/runs/$runId/stop');
     final resp = await http
@@ -231,6 +234,42 @@ class HermesApiService {
         .timeout(const Duration(seconds: 10));
     return resp.statusCode == 200;
   }
+
+  /// SSE event stream for a run. Yields raw SSE lines (event + data).
+  Stream<Map<String, String>> runEventStream(String runId) async* {
+    final uri = Uri.parse('$_baseUrl/v1/runs/$runId/events');
+    final request = http.Request('GET', uri);
+    request.headers.addAll(_headers);
+
+    final client = http.Client();
+    try {
+      final streamed = await client.send(request);
+
+      await for (final line in streamed.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.isEmpty) continue;
+        final colon = line.indexOf(':');
+        if (colon == -1) {
+          // bare data line — treat as data with no event
+          yield {'event': 'data', 'data': line.substring('data:'.length).trim()};
+          continue;
+        }
+        final key = line.substring(0, colon).trim();
+        final value = line.substring(colon + 1).trim();
+        if (key == 'event') {
+          _lastEvent = value;
+        } else if (key == 'data') {
+          yield {'event': _lastEvent ?? 'data', 'data': value};
+          if (value == '[DONE]') break;
+        }
+      }
+    } finally {
+      client.close();
+      _lastEvent = null;
+    }
+  }
+  String? _lastEvent;
 
   // ── Capabilities ──
 

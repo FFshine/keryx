@@ -42,6 +42,9 @@ class ChatProvider extends ChangeNotifier {
   String _currentResponse = '';
   String? _attachedImage;
   bool _loaded = false;
+  bool _useRunApi = false;
+  String? _currentRunId;
+  final List<FileOutput> _pendingFiles = [];
 
   ChatProvider(this._api) {
     _createNewSession();
@@ -58,6 +61,14 @@ class ChatProvider extends ChangeNotifier {
   String? get attachedImage => _attachedImage;
   bool get hasAttachedImage => _attachedImage != null;
   bool get loaded => _loaded;
+  /// Use Runs API instead of Chat Completions (enables tool calls & file outputs)
+  bool get useRunApi => _useRunApi;
+  set useRunApi(bool v) {
+    _useRunApi = v;
+    notifyListeners();
+  }
+
+  String? get currentRunId => _currentRunId;
 
   // ── Persistence ──
 
@@ -218,6 +229,15 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
     _saveSessions();
 
+    if (_useRunApi) {
+      await _sendMessageRun(userMsg);
+    } else {
+      await _sendMessageChat(userMsg);
+    }
+  }
+
+  /// Standard Chat Completions (streaming)
+  Future<void> _sendMessageChat(ChatMessage userMsg) async {
     try {
       final apiMessages = [
         ...messages.take(messages.length - 1).map((m) => m.toJson()),
@@ -253,9 +273,101 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  /// Runs API (enables tool calls, file outputs)
+  Future<void> _sendMessageRun(ChatMessage userMsg) async {
+    try {
+      // Build context from previous messages
+      final fullConversation = [
+        ...messages.take(messages.length - 1).map((m) => m.toJson()),
+        userMsg.toJson(),
+      ];
+      final prompt = fullConversation.map((m) {
+        final role = m['role'];
+        final content = m['content'];
+        if (content is String) return '[$role]: $content';
+        return '[$role]: [image attached]';
+      }).join('\n');
+
+      // Start the run
+      _currentRunId = await _api.startRun(prompt: prompt);
+      _pendingFiles.clear();
+      final buffer = StringBuffer();
+
+      // Stream events
+      await for (final event in _api.runEventStream(_currentRunId!)) {
+        final eventType = event['event']!;
+        final data = event['data']!;
+
+        if (data == '[DONE]') break;
+
+        try {
+          final json = jsonDecode(data) as Map<String, dynamic>;
+
+          // Text content
+          if (json['type'] == 'text' || eventType == 'message' || eventType == 'text') {
+            final content = json['content'] as String? ?? json['data'] as String? ?? '';
+            if (content.isNotEmpty) {
+              buffer.write(content);
+              _currentResponse = buffer.toString();
+              notifyListeners();
+            }
+          }
+
+          // Tool calls — show as italic context
+          if (eventType == 'tool_call' || json['type'] == 'tool_call') {
+            final toolName = json['tool'] as String? ?? json['name'] as String? ?? 'unknown';
+            buffer.write('\n\n_🔧 Using **$toolName**..._\n\n');
+            _currentResponse = buffer.toString();
+            notifyListeners();
+          }
+
+          // File outputs
+          if (eventType == 'file' || json['type'] == 'file') {
+            _pendingFiles.add(FileOutput(
+              url: json['url'] as String? ?? json['path'] as String? ?? '',
+              name: json['name'] as String?,
+              mimeType: json['mimeType'] as String? ?? json['mime_type'] as String?,
+              size: json['size'] as int?,
+            ));
+          }
+        } catch (_) {
+          // Skip unparseable events
+        }
+      }
+
+      // Create assistant message with accumulated text + files
+      final assistantMsg = ChatMessage(
+        role: 'assistant',
+        content: buffer.toString(),
+        files: List.from(_pendingFiles),
+      );
+      _sessions[_currentIndex] = currentSession.copyWith(
+        messages: [...messages, assistantMsg],
+      );
+
+      _state = ChatState.idle;
+      _currentResponse = '';
+      _currentRunId = null;
+      _pendingFiles.clear();
+      notifyListeners();
+      _saveSessions();
+    } on ApiException catch (e) {
+      _error = e.message;
+      _state = ChatState.error;
+      _currentRunId = null;
+      notifyListeners();
+    } catch (e) {
+      _error = 'Error: $e';
+      _state = ChatState.error;
+      _currentRunId = null;
+      notifyListeners();
+    }
+  }
+
   void cancelStream() {
     _state = ChatState.idle;
     _currentResponse = '';
+    _currentRunId = null;
     notifyListeners();
   }
 

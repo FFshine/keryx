@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/chat_message.dart';
 import '../providers/chat_provider.dart';
@@ -176,6 +177,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
               ],
+            ),
+          ),
+          Consumer<ChatProvider>(
+            builder: (context, chat, _) => IconButton(
+              icon: Icon(
+                chat.useRunApi
+                    ? Icons.terminal
+                    : Icons.chat_bubble_outline,
+                size: 20,
+              ),
+              tooltip: chat.useRunApi ? 'Using Runs API' : 'Using Chat API',
+              onPressed: () => chat.useRunApi = !chat.useRunApi,
             ),
           ),
           PopupMenuButton<String>(
@@ -632,6 +645,11 @@ class _MessageBubble extends StatelessWidget {
                     const SizedBox(height: 4),
                     _TypingDots(color: colorScheme.primary),
                   ],
+                  // AI-generated file outputs
+                  if (message.hasFiles) ...[
+                    const SizedBox(height: 8),
+                    ...message.files.map((f) => _FileTile(file: f, colorScheme: colorScheme)),
+                  ],
                 ],
               ),
             ),
@@ -651,6 +669,103 @@ class _MessageBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ── File Tile ──
+
+class _FileTile extends StatelessWidget {
+  final FileOutput file;
+  final ColorScheme colorScheme;
+
+  const _FileTile({
+    required this.file,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (file.isImage) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            width: double.infinity,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: Image.network(
+                file.url,
+                fit: BoxFit.contain,
+                loadingBuilder: (_, child, progress) {
+                  if (progress == null) return child;
+                  return Container(
+                    height: 120,
+                    color: colorScheme.surfaceContainerLow,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(strokeWidth: 2),
+                          const SizedBox(height: 8),
+                          Text(
+                            file.displayName,
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                errorBuilder: (_, __, ___) => Container(
+                  height: 80,
+                  color: colorScheme.errorContainer,
+                  child: Center(child: Text('Failed to load image')),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Non-image file — show as a card with download link
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Card(
+        elevation: 0,
+        color: colorScheme.surfaceContainerHighest,
+        child: ListTile(
+          dense: true,
+          leading: Icon(
+            Icons.insert_drive_file_outlined,
+            color: colorScheme.primary,
+          ),
+          title: Text(
+            file.displayName,
+            style: const TextStyle(fontSize: 13),
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: file.size != null
+              ? Text(_formatSize(file.size!), style: const TextStyle(fontSize: 11))
+              : null,
+          trailing: Icon(Icons.open_in_new, size: 16, color: colorScheme.primary),
+          onTap: () async {
+            // Open URL in browser
+            final uri = Uri.tryParse(file.url);
+            if (uri != null && await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 
