@@ -141,6 +141,42 @@ class _ChatScreenState extends State<ChatScreen> {
               context.read<ChatProvider>().createNewSession();
             },
           ),
+          // Sessions / History button — the main entry to see all saved sessions
+          Consumer<ChatProvider>(
+            builder: (context, chat, _) => Stack(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.history),
+                  tooltip: 'View history',
+                  onPressed: () =>
+                      Navigator.pushNamed(context, '/sessions'),
+                ),
+                if (chat.sessions.length > 1)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${chat.sessions.length - 1}',
+                          style: const TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           PopupMenuButton<String>(
             onSelected: (v) {
               switch (v) {
@@ -195,6 +231,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 final msgs = chat.messages;
                 final isStreaming = chat.isStreaming;
                 final streamText = chat.currentResponse;
+
+                if (!chat.loaded) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
                 if (msgs.isEmpty && !isStreaming) {
                   return _buildEmptyState(theme, colorScheme);

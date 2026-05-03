@@ -1,8 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
+
+/// Remove characters that would cause jsonEncode to fail (unpaired surrogates).
+String sanitizeJson(String input) {
+  final chars = input.runes.where((r) => !_isUnpairedSurrogate(r)).toList();
+  return String.fromCharCodes(chars);
+}
+
+bool _isUnpairedSurrogate(int rune) => rune >= 0xD800 && rune <= 0xDFFF;
+
+/// Sanitize all string values in a JSON-serializable object recursively.
+dynamic _sanitize(dynamic value) {
+  if (value is String) return sanitizeJson(value);
+  if (value is List) return value.map(_sanitize).toList();
+  if (value is Map) {
+    return value.map((k, v) => MapEntry(_sanitize(k), _sanitize(v)));
+  }
+  return value;
+}
 
 class HermesApiService {
   String _baseUrl;
@@ -34,7 +51,9 @@ class HermesApiService {
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (_apiKey.isNotEmpty) 'Authorization': 'Bearer $_apiKey',
-        if (_sessionId != null) 'X-Hermes-Session-Id': _sessionId!,
+        // Only send session header when API key is configured
+        if (_sessionId != null && _apiKey.isNotEmpty)
+          'X-Hermes-Session-Id': _sessionId!,
       };
 
   // ── Health Check ──
@@ -72,7 +91,7 @@ class HermesApiService {
     bool storeSession = true,
   }) async* {
     final uri = Uri.parse('$_baseUrl/v1/chat/completions');
-    final body = jsonEncode({
+    final body = jsonEncode(_sanitize({
       'model': model,
       'messages': messages,
       'stream': true,
@@ -80,41 +99,32 @@ class HermesApiService {
         'store': true,
         'metadata': {'source': 'keryx'},
       },
-    });
+    }));
 
     final request = http.Request('POST', uri);
     request.headers.addAll(_headers);
     request.body = body;
 
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 10);
+    final client = http.Client();
 
     try {
-      final httpResp = await client
-          .postUrl(uri)
+      final streamed = await client
+          .send(request)
           .timeout(const Duration(seconds: 15));
 
-      httpResp.headers.set('Content-Type', 'application/json');
-      httpResp.headers.set('Authorization', _headers['Authorization'] ?? '');
-      httpResp.headers.set('X-Hermes-Session-Id', _headers['X-Hermes-Session-Id'] ?? '');
-      httpResp.write(body);
-      await httpResp.flush();
-
-      final response = await httpResp.close();
-
-      if (response.statusCode != 200) {
-        final errorBody = await response.transform(utf8.decoder).join();
+      if (streamed.statusCode != 200) {
+        final errorBody = await streamed.stream.bytesToString();
         throw ApiException(
-          'API error ${response.statusCode}: $errorBody',
+          'API error ${streamed.statusCode}: $errorBody',
         );
       }
 
-      final sessionHeader = response.headers.value('x-hermes-session-id');
+      final sessionHeader = streamed.headers['x-hermes-session-id'];
       if (sessionHeader != null && _sessionId == null) {
         _sessionId = sessionHeader;
       }
 
-      await for (final chunk in response
+      await for (final chunk in streamed.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
         if (!chunk.startsWith('data: ')) continue;
@@ -147,7 +157,7 @@ class HermesApiService {
     bool storeSession = true,
   }) async {
     final uri = Uri.parse('$_baseUrl/v1/chat/completions');
-    final body = jsonEncode({
+    final body = jsonEncode(_sanitize({
       'model': model,
       'messages': messages,
       'stream': false,
@@ -155,7 +165,7 @@ class HermesApiService {
         'store': true,
         'metadata': {'source': 'keryx'},
       },
-    });
+    }));
 
     final resp = await http
         .post(uri, headers: _headers, body: body)
@@ -187,10 +197,10 @@ class HermesApiService {
     String? model,
   }) async {
     final uri = Uri.parse('$_baseUrl/v1/runs');
-    final body = jsonEncode({
+    final body = jsonEncode(_sanitize({
       'messages': [{'role': 'user', 'content': prompt}],
       if (model != null) 'model': model,
-    });
+    }));
 
     final resp = await http
         .post(uri, headers: _headers, body: body)

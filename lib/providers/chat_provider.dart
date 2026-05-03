@@ -4,14 +4,33 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_message.dart';
 import '../services/hermes_api_service.dart';
 
+/// Strip unpaired UTF-16 surrogates that would crash jsonEncode.
+String _safeJson(String input) {
+  final chars = input.runes.where((r) => r < 0xD800 || r > 0xDFFF).toList();
+  return String.fromCharCodes(chars);
+}
+
+/// Recursively sanitize all strings in a JSON-serializable value.
+dynamic _sanitize(dynamic value) {
+  if (value is String) return _safeJson(value);
+  if (value is List) return value.map(_sanitize).toList();
+  if (value is Map) {
+    return value.map((k, v) => MapEntry(_sanitize(k), _sanitize(v)));
+  }
+  return value;
+}
+
 enum ChatState { idle, streaming, error }
 
 class ChatProvider extends ChangeNotifier {
+  static const _sessionsFile = 'keryx_sessions.json';
+
   final HermesApiService _api;
   final _uuid = const Uuid();
   final List<ChatSession> _sessions = [];
@@ -21,7 +40,8 @@ class ChatProvider extends ChangeNotifier {
   ChatState _state = ChatState.idle;
   String? _error;
   String _currentResponse = '';
-  String? _attachedImage; // base64 data URI
+  String? _attachedImage;
+  bool _loaded = false;
 
   ChatProvider(this._api) {
     _createNewSession();
@@ -37,6 +57,53 @@ class ChatProvider extends ChangeNotifier {
   bool get isStreaming => _state == ChatState.streaming;
   String? get attachedImage => _attachedImage;
   bool get hasAttachedImage => _attachedImage != null;
+  bool get loaded => _loaded;
+
+  // ── Persistence ──
+
+  /// Load sessions from local JSON file. Call once on app start.
+  Future<void> loadSessions() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$_sessionsFile');
+      if (!await file.exists()) {
+        _createNewSession();
+        _loaded = true;
+        notifyListeners();
+        return;
+      }
+      final raw = await file.readAsString();
+      final list = jsonDecode(raw) as List;
+      _sessions.clear();
+      for (final item in list) {
+        _sessions.add(ChatSession.fromPersistJson(item as Map<String, dynamic>));
+      }
+      if (_sessions.isEmpty) {
+        _createNewSession();
+      } else {
+        _currentIndex = 0;
+      }
+      _loaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load sessions: $e');
+      _createNewSession();
+      _loaded = true;
+      notifyListeners();
+    }
+  }
+
+  /// Save all sessions to local JSON file.
+  Future<void> _saveSessions() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$_sessionsFile');
+      final json = jsonEncode(_sanitize(_sessions.map((s) => s.toPersistJson()).toList()));
+      await file.writeAsString(json);
+    } catch (e) {
+      debugPrint('Failed to save sessions: $e');
+    }
+  }
 
   // ── Image Attachment ──
 
@@ -93,6 +160,7 @@ class ChatProvider extends ChangeNotifier {
     _sessions.add(session);
     _currentIndex = _sessions.length - 1;
     _api.resetSession();
+    _saveSessions();
   }
 
   void createNewSession() {
@@ -141,13 +209,14 @@ class ChatProvider extends ChangeNotifier {
     _sessions[_currentIndex] = currentSession.copyWith(
       messages: [...messages, userMsg],
     );
-    _attachedImage = null; // clear attachment after sending
+    _attachedImage = null;
 
     if (text.trim().isNotEmpty) _updateSessionTitle();
     _state = ChatState.streaming;
     _currentResponse = '';
     _error = null;
     notifyListeners();
+    _saveSessions();
 
     try {
       final apiMessages = [
@@ -172,6 +241,7 @@ class ChatProvider extends ChangeNotifier {
       _state = ChatState.idle;
       _currentResponse = '';
       notifyListeners();
+      _saveSessions();
     } on ApiException catch (e) {
       _error = e.message;
       _state = ChatState.error;
@@ -193,5 +263,49 @@ class ChatProvider extends ChangeNotifier {
     _error = null;
     if (_state == ChatState.error) _state = ChatState.idle;
     notifyListeners();
+  }
+
+  /// Delete the current session and switch to another one.
+  void deleteCurrentSession() {
+    if (_sessions.length <= 1) {
+      // Last session — just clear it instead of deleting
+      _sessions[_currentIndex] = ChatSession(
+        id: _uuid.v4(),
+        title: 'New Chat',
+      );
+      _api.resetSession();
+      notifyListeners();
+      _saveSessions();
+      return;
+    }
+    _sessions.removeAt(_currentIndex);
+    if (_currentIndex >= _sessions.length) {
+      _currentIndex = _sessions.length - 1;
+    }
+    _api.resetSession();
+    _state = ChatState.idle;
+    _error = null;
+    _currentResponse = '';
+    notifyListeners();
+    _saveSessions();
+  }
+
+  /// Delete all sessions and start fresh.
+  Future<void> clearAllSessions() async {
+    _sessions.clear();
+    _createNewSession();
+    _state = ChatState.idle;
+    _error = null;
+    _currentResponse = '';
+    _attachedImage = null;
+    _api.resetSession();
+    notifyListeners();
+
+    // Also delete the file to reset storage
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$_sessionsFile');
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 }

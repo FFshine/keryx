@@ -15,7 +15,11 @@ void main() {
       providers: [
         ChangeNotifierProvider(create: (_) => ConnectionProvider()),
         ChangeNotifierProxyProvider<ConnectionProvider, ChatProvider>(
-          create: (ctx) => ChatProvider(ctx.read<ConnectionProvider>().api),
+          create: (ctx) {
+            final chat = ChatProvider(ctx.read<ConnectionProvider>().api);
+            chat.loadSessions();
+            return chat;
+          },
           update: (_, conn, chat) {
             chat ??= ChatProvider(conn.api);
             return chat;

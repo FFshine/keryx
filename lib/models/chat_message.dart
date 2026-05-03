@@ -8,7 +8,6 @@ class ChatMessage {
   final DateTime timestamp;
 
   Uint8List? _cachedImageBytes;
-  int? _cachedMessageCount;
 
   ChatMessage({
     required this.role,
@@ -31,6 +30,8 @@ class ChatMessage {
     }
   }
 
+  // ── Hermes API JSON ──
+
   /// JSON for Hermes API — returns simple string or multi-part array
   dynamic toApiJson() {
     if (imageDataUri == null) return content;
@@ -51,6 +52,23 @@ class ChatMessage {
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
         role: json['role'] as String,
         content: json['content'] as String,
+      );
+
+  // ── Persistence JSON (saves all fields) ──
+
+  Map<String, dynamic> toPersistJson() => {
+        'role': role,
+        'content': content,
+        if (imageDataUri != null) 'imageDataUri': imageDataUri,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  factory ChatMessage.fromPersistJson(Map<String, dynamic> json) =>
+      ChatMessage(
+        role: json['role'] as String,
+        content: json['content'] as String,
+        imageDataUri: json['imageDataUri'] as String?,
+        timestamp: DateTime.parse(json['timestamp'] as String),
       );
 
   ChatMessage copyWith({
@@ -110,4 +128,33 @@ class ChatSession {
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? DateTime.now(),
       );
+
+  // ── Persistence JSON ──
+
+  Map<String, dynamic> toPersistJson() => {
+        'id': id,
+        'title': title,
+        'messages': messages.map((m) => m.toPersistJson()).toList(),
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+      };
+
+  factory ChatSession.fromPersistJson(Map<String, dynamic> json) {
+    final msgs = (json['messages'] as List?)
+            ?.cast<Map<String, dynamic>>()
+            .map((m) => ChatMessage.fromPersistJson(m))
+            .toList() ??
+        [];
+    return ChatSession(
+      id: json['id'] as String,
+      title: json['title'] as String? ?? 'New Chat',
+      messages: msgs,
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : null,
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'] as String)
+          : null,
+    );
+  }
 }
