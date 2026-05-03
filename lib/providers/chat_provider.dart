@@ -31,6 +31,15 @@ enum ChatState { idle, streaming, error }
 class ChatProvider extends ChangeNotifier {
   static const _sessionsFile = 'keryx_sessions.json';
 
+  /// Use external storage first (survives reinstall), fall back to app documents.
+  Future<Directory?> _storageDir() async {
+    try {
+      final ext = await getExternalStorageDirectory();
+      if (ext != null) return ext;
+    } catch (_) {}
+    return getApplicationDocumentsDirectory();
+  }
+
   final HermesApiService _api;
   final _uuid = const Uuid();
   final List<ChatSession> _sessions = [];
@@ -75,7 +84,13 @@ class ChatProvider extends ChangeNotifier {
   /// Load sessions from local JSON file. Call once on app start.
   Future<void> loadSessions() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await _storageDir();
+      if (dir == null) {
+        _createNewSession();
+        _loaded = true;
+        notifyListeners();
+        return;
+      }
       final file = File('${dir.path}/$_sessionsFile');
       if (!await file.exists()) {
         _createNewSession();
@@ -107,7 +122,8 @@ class ChatProvider extends ChangeNotifier {
   /// Save all sessions to local JSON file.
   Future<void> _saveSessions() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await _storageDir();
+      if (dir == null) return;
       final file = File('${dir.path}/$_sessionsFile');
       final json = jsonEncode(_sanitize(_sessions.map((s) => s.toPersistJson()).toList()));
       await file.writeAsString(json);
@@ -430,7 +446,8 @@ class ChatProvider extends ChangeNotifier {
 
     // Also delete the file to reset storage
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await _storageDir();
+      if (dir == null) return;
       final file = File('${dir.path}/$_sessionsFile');
       if (await file.exists()) await file.delete();
     } catch (_) {}
