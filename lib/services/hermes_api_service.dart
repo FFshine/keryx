@@ -194,12 +194,12 @@ class HermesApiService {
 
   /// Start a run and return the run_id.
   Future<String> startRun({
-    required String prompt,
+    required List<Map<String, dynamic>> messages,
     String? model,
   }) async {
     final uri = Uri.parse('$_baseUrl/v1/runs');
     final body = jsonEncode({
-      'messages': [{'role': 'user', 'content': prompt}],
+      'input': messages,
       if (model != null) 'model': model,
     });
 

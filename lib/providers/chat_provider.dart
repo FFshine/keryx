@@ -276,53 +276,68 @@ class ChatProvider extends ChangeNotifier {
   /// Runs API (enables tool calls, file outputs)
   Future<void> _sendMessageRun(ChatMessage userMsg) async {
     try {
-      // Build context from previous messages
-      final fullConversation = [
+      // Use full messages array as input (not flattened)
+      final messagesInput = [
         ...messages.take(messages.length - 1).map((m) => m.toJson()),
         userMsg.toJson(),
       ];
-      final prompt = fullConversation.map((m) {
-        final role = m['role'];
-        final content = m['content'];
-        if (content is String) return '[$role]: $content';
-        return '[$role]: [image attached]';
-      }).join('\n');
 
       // Start the run
-      _currentRunId = await _api.startRun(prompt: prompt);
+      _currentRunId = await _api.startRun(messages: messagesInput);
       _pendingFiles.clear();
       final buffer = StringBuffer();
 
       // Stream events
       await for (final event in _api.runEventStream(_currentRunId!)) {
-        final eventType = event['event']!;
         final data = event['data']!;
-
         if (data == '[DONE]') break;
 
         try {
           final json = jsonDecode(data) as Map<String, dynamic>;
+          final innerEvent = json['event'] as String?;
 
-          // Text content
-          if (json['type'] == 'text' || eventType == 'message' || eventType == 'text') {
-            final content = json['content'] as String? ?? json['data'] as String? ?? '';
-            if (content.isNotEmpty) {
-              buffer.write(content);
+          // ── Streaming text delta ──
+          if (innerEvent == 'message.delta') {
+            final delta = json['delta'] as String? ?? '';
+            if (delta.isNotEmpty) {
+              buffer.write(delta);
               _currentResponse = buffer.toString();
               notifyListeners();
             }
           }
 
-          // Tool calls — show as italic context
-          if (eventType == 'tool_call' || json['type'] == 'tool_call') {
+          // ── Final reasoning text (full output) ──
+          if (innerEvent == 'reasoning.available') {
+            final text = json['text'] as String? ?? '';
+            if (text.isNotEmpty && buffer.isEmpty) {
+              // Only use if we got no deltas (safety net)
+              buffer.write(text);
+              _currentResponse = buffer.toString();
+              notifyListeners();
+            }
+          }
+
+          // ── Run completed ──
+          if (innerEvent == 'run.completed') {
+            final output = json['output'] as String? ?? '';
+            if (output.isNotEmpty && buffer.isEmpty) {
+              buffer.write(output);
+              _currentResponse = buffer.toString();
+              notifyListeners();
+            }
+            break; // Done!
+          }
+
+          // ── Tool calls — show as italic context ──
+          if (innerEvent == 'tool_call' || json['type'] == 'tool_call') {
             final toolName = json['tool'] as String? ?? json['name'] as String? ?? 'unknown';
             buffer.write('\n\n_🔧 Using **$toolName**..._\n\n');
             _currentResponse = buffer.toString();
             notifyListeners();
           }
 
-          // File outputs
-          if (eventType == 'file' || json['type'] == 'file') {
+          // ── File outputs ──
+          if (innerEvent == 'file' || json['type'] == 'file') {
             _pendingFiles.add(FileOutput(
               url: json['url'] as String? ?? json['path'] as String? ?? '',
               name: json['name'] as String?,
