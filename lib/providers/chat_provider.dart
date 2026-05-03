@@ -40,6 +40,29 @@ class ChatProvider extends ChangeNotifier {
     return getApplicationDocumentsDirectory();
   }
 
+  /// Migrate sessions from old (internal) location to new (external) location.
+  Future<void> _migrateIfNeeded({
+    required Directory targetDir,
+    required File targetFile,
+  }) async {
+    if (await targetFile.exists()) return; // already migrated
+    try {
+      final oldDir = await getApplicationDocumentsDirectory();
+      // Skip if targetDir IS the old dir (fallback path)
+      if (oldDir.path == targetDir.path) return;
+      final oldFile = File('${oldDir.path}/$_sessionsFile');
+      if (!await oldFile.exists()) return;
+      final raw = await oldFile.readAsString();
+      if (raw.trim().isEmpty) return;
+      // Ensure target directory exists
+      await targetDir.create(recursive: true);
+      await targetFile.writeAsString(raw);
+      debugPrint('Migrated sessions from internal to external storage');
+    } catch (e) {
+      debugPrint('Migration failed (harmless): $e');
+    }
+  }
+
   final HermesApiService _api;
   final _uuid = const Uuid();
   final List<ChatSession> _sessions = [];
@@ -92,6 +115,10 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
       final file = File('${dir.path}/$_sessionsFile');
+
+      // Migrate old sessions from internal storage before checking existence
+      await _migrateIfNeeded(targetDir: dir, targetFile: file);
+
       if (!await file.exists()) {
         _createNewSession();
         _loaded = true;
