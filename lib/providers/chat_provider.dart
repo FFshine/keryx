@@ -79,12 +79,13 @@ class ChatProvider extends ChangeNotifier {
   final List<FileOutput> _pendingFiles = [];
 
   ChatProvider(this._api) {
-    _createNewSession();
+    // Don't create sessions here — wait for loadSessions()
   }
 
   int get currentIndex => _currentIndex;
   List<ChatSession> get sessions => List.unmodifiable(_sessions);
-  ChatSession get currentSession => _sessions[_currentIndex];
+  ChatSession get currentSession =>
+      _sessions.isNotEmpty ? _sessions[_currentIndex] : ChatSession(id: '', title: '');
   List<ChatMessage> get messages => currentSession.messages;
   ChatState get state => _state;
   String? get error => _error;
