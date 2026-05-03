@@ -113,8 +113,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Consumer<ChatProvider>(
           builder: (context, chat, _) => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -427,7 +430,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _buildEmptyState(ThemeData theme, ColorScheme colorScheme) {
